@@ -1,4 +1,4 @@
--- 第一步：创建解码函数（解析ERC-20金额的标准方法）
+-- 第一步：创建解码函数
 CREATE TEMP FUNCTION
   DECODE_ERC20_TRANSFER(data STRING, topics ARRAY<STRING>)
   RETURNS STRUCT<`from` STRING, `to` STRING, value STRING>
@@ -23,7 +23,7 @@ CREATE TEMP FUNCTION
 """
 OPTIONS (library="gs://blockchain-etl-bigquery/ethers.js");
 
--- 第二步：获取完整数据（1年范围 + 金额>10 + 随机100万条）
+-- 第二步：获取完整数据（使用概率抽样避免内存溢出）
 WITH stablecoin_tokens AS (
   SELECT 
     address,
@@ -35,7 +35,6 @@ WITH stablecoin_tokens AS (
 
 decoded_logs AS (
   SELECT 
-    -- Logs表中的ERC-20转账信息
     logs.log_index,
     logs.transaction_hash,
     logs.transaction_index,
@@ -45,16 +44,13 @@ decoded_logs AS (
     logs.block_timestamp,
     logs.block_number,
     
-    -- 解码后的转账信息
     DECODE_ERC20_TRANSFER(logs.data, logs.topics).from AS transfer_from,
     DECODE_ERC20_TRANSFER(logs.data, logs.topics).to AS transfer_to,
     DECODE_ERC20_TRANSFER(logs.data, logs.topics).value AS raw_value_str,
     
-    -- Token元数据
     tokens.symbol,
     SAFE_CAST(tokens.decimals AS INT64) AS decimals,
     
-    -- 关联transactions表获取交易详细信息
     transactions.nonce,
     transactions.gas AS gas_limit,
     transactions.gas_price,
@@ -85,38 +81,29 @@ safe_amounts AS (
     *,
     SAFE_CAST(raw_value_str AS NUMERIC) / POW(10, decimals) AS token_amount,
     SAFE_CAST(eth_value_wei AS NUMERIC) / 1e18 AS eth_amount,
-    
-    -- 【关键修复】使用 NUMERIC 字面量 1.0 强制转换整个表达式为 NUMERIC
-    -- 方法：先将每个字段转为 NUMERIC，再用 NUMERIC 乘法
     (SAFE_CAST(receipt_gas_used AS NUMERIC) * SAFE_CAST(receipt_effective_gas_price AS NUMERIC)) / 1e18 AS transaction_fee_eth
-    
   FROM decoded_logs
 ),
 
 filtered_amounts AS (
   SELECT 
-    -- 时间特征
     block_timestamp,
     DATE(block_timestamp) AS tx_date,
     EXTRACT(HOUR FROM block_timestamp) AS tx_hour,
     
-    -- 交易标识
     transaction_hash,
     block_number,
     transaction_index,
     log_index,
     
-    -- 地址信息（重要：用于后续标签匹配）
     transfer_from AS from_address,
     transfer_to AS to_address,
     tx_from_address AS transaction_sender,
     token_contract_address,
     
-    -- 金额特征
     token_amount,
     eth_amount,
     
-    -- Gas相关特征
     gas_limit,
     gas_price,
     receipt_gas_used,
@@ -125,32 +112,30 @@ filtered_amounts AS (
     max_priority_fee_per_gas,
     transaction_type,
     
-    -- 交易成本计算
     transaction_fee_eth,
     
-    -- 交易状态和类型
     receipt_status,
     receipt_contract_address,
     
-    -- Token信息
     symbol,
     decimals,
     
-    -- 原始数据
     raw_amount_hex,
-    input
+    input,
+    
+    -- 【关键】添加随机数用于抽样
+    RAND() AS random_key
     
   FROM safe_amounts
   WHERE token_amount IS NOT NULL
     AND token_amount > 10
     AND token_amount < 1e12
     AND receipt_status = 1
-    -- 【额外防护】过滤异常大的 Gas 值，防止 NUMERIC 计算时性能问题
-    AND SAFE_CAST(receipt_gas_used AS NUMERIC) < 1e7  -- Gas 使用量 < 10,000,000
-    AND SAFE_CAST(receipt_effective_gas_price AS NUMERIC) < 1e12  -- Gas 价格 < 1000 Gwei
+    AND SAFE_CAST(receipt_gas_used AS NUMERIC) < 1e7
+    AND SAFE_CAST(receipt_effective_gas_price AS NUMERIC) < 1e12
 )
 
--- 随机抽取 1,000,000 条数据
+-- 【关键修改】使用 WHERE 概率抽样 + LIMIT，避免 ORDER BY
 SELECT 
   block_timestamp,
   tx_date,
@@ -180,5 +165,5 @@ SELECT
   raw_amount_hex,
   input
 FROM filtered_amounts
-ORDER BY RAND()
-LIMIT 1000000;
+WHERE random_key < 0.03  -- 抽取 3%（根据总量调整比例）
+LIMIT 1000000;  -- 最终限制输出数量
