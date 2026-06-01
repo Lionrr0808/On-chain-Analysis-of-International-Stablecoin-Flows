@@ -84,7 +84,12 @@ safe_amounts AS (
   SELECT 
     *,
     SAFE_CAST(raw_value_str AS NUMERIC) / POW(10, decimals) AS token_amount,
-    SAFE_CAST(eth_value_wei AS NUMERIC) / 1e18 AS eth_amount
+    SAFE_CAST(eth_value_wei AS NUMERIC) / 1e18 AS eth_amount,
+    
+    -- 【关键修复】使用 NUMERIC 字面量 1.0 强制转换整个表达式为 NUMERIC
+    -- 方法：先将每个字段转为 NUMERIC，再用 NUMERIC 乘法
+    (SAFE_CAST(receipt_gas_used AS NUMERIC) * SAFE_CAST(receipt_effective_gas_price AS NUMERIC)) / 1e18 AS transaction_fee_eth
+    
   FROM decoded_logs
 ),
 
@@ -104,14 +109,14 @@ filtered_amounts AS (
     -- 地址信息（重要：用于后续标签匹配）
     transfer_from AS from_address,
     transfer_to AS to_address,
-    tx_from_address AS transaction_sender,  -- 交易发起方（可能不同于transfer_from）
+    tx_from_address AS transaction_sender,
     token_contract_address,
     
     -- 金额特征
     token_amount,
     eth_amount,
     
-    -- Gas相关特征（反映交易成本和复杂度）
+    -- Gas相关特征
     gas_limit,
     gas_price,
     receipt_gas_used,
@@ -121,25 +126,28 @@ filtered_amounts AS (
     transaction_type,
     
     -- 交易成本计算
-    (receipt_gas_used * receipt_effective_gas_price) / 1e18 AS transaction_fee_eth,
+    transaction_fee_eth,
     
     -- 交易状态和类型
     receipt_status,
-    receipt_contract_address,  -- 如果这笔交易创建了新合约
+    receipt_contract_address,
     
     -- Token信息
     symbol,
     decimals,
     
-    -- 原始数据（供后续Python解析）
+    -- 原始数据
     raw_amount_hex,
-    input  -- 交易的input数据，可能包含额外信息
+    input
     
   FROM safe_amounts
   WHERE token_amount IS NOT NULL
     AND token_amount > 10
     AND token_amount < 1e12
     AND receipt_status = 1
+    -- 【额外防护】过滤异常大的 Gas 值，防止 NUMERIC 计算时性能问题
+    AND SAFE_CAST(receipt_gas_used AS NUMERIC) < 1e7  -- Gas 使用量 < 10,000,000
+    AND SAFE_CAST(receipt_effective_gas_price AS NUMERIC) < 1e12  -- Gas 价格 < 1000 Gwei
 )
 
 -- 随机抽取 1,000,000 条数据
