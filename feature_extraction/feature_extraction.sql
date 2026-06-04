@@ -1,6 +1,6 @@
 -- ============================================================
--- 完整特征提取 SQL（最终版）
--- 包含：24小时交易百分比 + 6个时段平均时间 + 所有其他特征
+-- 完整特征提取 SQL（最终修正版）
+-- 包含：24小时交易百分比 + 6个时段平均时间 + Top 5 CEX（名称+地区+次数）
 -- ============================================================
 
 CREATE OR REPLACE TABLE `stablecoin-on-chain-analysis.wallets.wallet_features_complete` AS
@@ -13,10 +13,11 @@ all_wallets AS (
     WHERE `wallet address` IS NOT NULL
 ),
 
--- 2. 标准化CEX地址（小写）
+-- 2. 标准化CEX地址（小写，包含名称和地区）
 cex_normalized AS (
     SELECT 
         LOWER(address) as address,
+        cex_name,
         region
     FROM `stablecoin-on-chain-analysis.wallets.cex_addresses`
     WHERE address IS NOT NULL AND region IS NOT NULL
@@ -66,7 +67,7 @@ hourly_percentages AS (
     GROUP BY w.wallet, w.tx_hour_utc, wt.total_cnt
 ),
 
--- 6. 基础特征（包含新特征）
+-- 6. 基础特征
 base_features AS (
     SELECT 
         wallet,
@@ -83,20 +84,20 @@ base_features AS (
         SAFE_DIVIDE(COUNTIF(eth_amount < 0.01), COUNT(*)) as micro_tx_ratio,
         SAFE_DIVIDE(COUNTIF(eth_amount = 0), COUNT(*)) as zero_value_tx_ratio,
         
-        -- 时段比例（原有时段）
+        -- 时段比例
         SAFE_DIVIDE(COUNTIF(tx_hour_utc BETWEEN 0 AND 5), COUNT(*)) as night_ratio,
         SAFE_DIVIDE(COUNTIF(tx_hour_utc BETWEEN 0 AND 3), COUNT(*)) as early_morning_ratio,
         SAFE_DIVIDE(COUNTIF(tx_hour_utc BETWEEN 8 AND 20), COUNT(*)) as daytime_ratio,
-        SAFE_DIVIDE(COUNTIF(tx_dow IN (1,7)), COUNT(*)) as weekend_ratio,  -- 周末交易占比
+        SAFE_DIVIDE(COUNTIF(tx_dow IN (1,7)), COUNT(*)) as weekend_ratio,
         
         -- DST 特征（夏令时：3-10月）
         APPROX_TOP_COUNT(CASE WHEN tx_month BETWEEN 3 AND 10 THEN tx_hour_utc END, 1)[OFFSET(0)].value as dst_mode_hour,
         APPROX_TOP_COUNT(CASE WHEN tx_month NOT BETWEEN 3 AND 10 THEN tx_hour_utc END, 1)[OFFSET(0)].value as non_dst_mode_hour,
         
-        -- 交易小时方差（规律性）
+        -- 交易小时方差
         STDDEV(tx_hour_utc) as tx_hour_variance,
         
-        -- 特定区间平均交易时间（6个区间）
+        -- 6个特定区间平均交易时间
         AVG(CASE WHEN (tx_month = 3 AND tx_day >= 14) OR (tx_month BETWEEN 4 AND 10) OR (tx_month = 11 AND tx_day <= 7) 
                  THEN tx_hour_utc END) as avg_tx_hour_period1,
         AVG(CASE WHEN (tx_month = 11 AND tx_day >= 8) OR (tx_month = 12) OR (tx_month = 1) OR (tx_month = 2) OR (tx_month = 3 AND tx_day <= 13)
@@ -212,7 +213,7 @@ top_tokens AS (
     FROM ranked_tokens WHERE rn <= 10 GROUP BY wallet
 ),
 
--- 9. 稳定币偏好（从token统计中单独计算）
+-- 9. 稳定币偏好
 stablecoin_prefs AS (
     SELECT 
         wallet,
@@ -268,7 +269,7 @@ top_namespaces AS (
     FROM ranked_namespaces WHERE rn <= 10 GROUP BY wallet
 ),
 
--- 11. 协议比率特征（从namespace统计）
+-- 11. 协议比率特征
 protocol_ratios AS (
     SELECT 
         wallet,
@@ -280,66 +281,159 @@ protocol_ratios AS (
     GROUP BY wallet
 ),
 
--- 12. CEX 交互（发起+接收）
+-- 12. CEX 交互（发起+接收，同时保留 cex_name 和 region）
 cex_interactions AS (
-    SELECT LOWER(t.from_address) as wallet, c.region
+    SELECT 
+        LOWER(t.from_address) as wallet, 
+        c.cex_name,
+        c.region
     FROM `bigquery-public-data.crypto_ethereum.transactions` t
     INNER JOIN all_wallets w ON LOWER(t.from_address) = w.wallet
     INNER JOIN cex_normalized c ON LOWER(t.to_address) = c.address
     WHERE t.block_timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 365 DAY)
       AND t.receipt_status = 1
+    
     UNION ALL
-    SELECT LOWER(t.to_address) as wallet, c.region
+    
+    SELECT 
+        LOWER(t.to_address) as wallet, 
+        c.cex_name,
+        c.region
     FROM `bigquery-public-data.crypto_ethereum.transactions` t
     INNER JOIN all_wallets w ON LOWER(t.to_address) = w.wallet
     INNER JOIN cex_normalized c ON LOWER(t.from_address) = c.address
     WHERE t.block_timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 365 DAY)
       AND t.receipt_status = 1
 ),
-cex_counts AS (
-    SELECT wallet, region, COUNT(*) as cnt,
-           ROW_NUMBER() OVER (PARTITION BY wallet ORDER BY COUNT(*) DESC) as rn
-    FROM cex_interactions GROUP BY wallet, region
+
+-- 统计每个钱包-每个CEX的交互次数
+cex_stats AS (
+    SELECT 
+        wallet,
+        cex_name,
+        region,
+        COUNT(*) as cnt
+    FROM cex_interactions
+    GROUP BY wallet, cex_name, region
 ),
+
+-- 按交互次数排序
+ranked_cex AS (
+    SELECT 
+        wallet,
+        cex_name,
+        region,
+        cnt,
+        ROW_NUMBER() OVER (PARTITION BY wallet ORDER BY cnt DESC) as rn
+    FROM cex_stats
+),
+
+-- Top 5 CEX（含名称、地区、次数）
 top_cex AS (
     SELECT 
         wallet,
-        MAX(CASE WHEN rn=1 THEN region END) as top1_cex_region,
-        MAX(CASE WHEN rn=1 THEN cnt END) as top1_cex_region_count,
-        MAX(CASE WHEN rn=2 THEN region END) as top2_cex_region,
-        MAX(CASE WHEN rn=2 THEN cnt END) as top2_cex_region_count,
-        MAX(CASE WHEN rn=3 THEN region END) as top3_cex_region,
-        MAX(CASE WHEN rn=3 THEN cnt END) as top3_cex_region_count,
-        MAX(CASE WHEN rn=4 THEN region END) as top4_cex_region,
-        MAX(CASE WHEN rn=4 THEN cnt END) as top4_cex_region_count,
-        MAX(CASE WHEN rn=5 THEN region END) as top5_cex_region,
-        MAX(CASE WHEN rn=5 THEN cnt END) as top5_cex_region_count
-    FROM cex_counts WHERE rn <= 5 GROUP BY wallet
+        MAX(CASE WHEN rn = 1 THEN cex_name END) as top1_cex,
+        MAX(CASE WHEN rn = 1 THEN region END) as top1_cex_region,
+        MAX(CASE WHEN rn = 1 THEN cnt END) as top1_cex_count,
+        MAX(CASE WHEN rn = 2 THEN cex_name END) as top2_cex,
+        MAX(CASE WHEN rn = 2 THEN region END) as top2_cex_region,
+        MAX(CASE WHEN rn = 2 THEN cnt END) as top2_cex_count,
+        MAX(CASE WHEN rn = 3 THEN cex_name END) as top3_cex,
+        MAX(CASE WHEN rn = 3 THEN region END) as top3_cex_region,
+        MAX(CASE WHEN rn = 3 THEN cnt END) as top3_cex_count,
+        MAX(CASE WHEN rn = 4 THEN cex_name END) as top4_cex,
+        MAX(CASE WHEN rn = 4 THEN region END) as top4_cex_region,
+        MAX(CASE WHEN rn = 4 THEN cnt END) as top4_cex_count,
+        MAX(CASE WHEN rn = 5 THEN cex_name END) as top5_cex,
+        MAX(CASE WHEN rn = 5 THEN region END) as top5_cex_region,
+        MAX(CASE WHEN rn = 5 THEN cnt END) as top5_cex_count
+    FROM ranked_cex
+    WHERE rn <= 5
+    GROUP BY wallet
 ),
 
 -- 13. 钱包本身就是CEX地址
 wallet_is_cex AS (
-    SELECT w.wallet, c.region as self_cex_region
+    SELECT 
+        w.wallet, 
+        c.cex_name as self_cex_name,
+        c.region as self_cex_region
     FROM all_wallets w
     INNER JOIN cex_normalized c ON w.wallet = c.address
 ),
 
+-- 处理钱包本身就是CEX的情况
 final_cex AS (
     SELECT 
         w.wallet,
-        CASE WHEN ic.self_cex_region IS NOT NULL THEN ic.self_cex_region ELSE t.top1_cex_region END as top1_cex_region,
-        CASE WHEN ic.self_cex_region IS NOT NULL THEN 999999 ELSE t.top1_cex_region_count END as top1_cex_region_count,
-        CASE WHEN ic.self_cex_region IS NOT NULL THEN ic.self_cex_region ELSE t.top2_cex_region END as top2_cex_region,
-        CASE WHEN ic.self_cex_region IS NOT NULL THEN 999999 ELSE t.top2_cex_region_count END as top2_cex_region_count,
-        CASE WHEN ic.self_cex_region IS NOT NULL THEN ic.self_cex_region ELSE t.top3_cex_region END as top3_cex_region,
-        CASE WHEN ic.self_cex_region IS NOT NULL THEN 999999 ELSE t.top3_cex_region_count END as top3_cex_region_count,
-        CASE WHEN ic.self_cex_region IS NOT NULL THEN ic.self_cex_region ELSE t.top4_cex_region END as top4_cex_region,
-        CASE WHEN ic.self_cex_region IS NOT NULL THEN 999999 ELSE t.top4_cex_region_count END as top4_cex_region_count,
-        CASE WHEN ic.self_cex_region IS NOT NULL THEN ic.self_cex_region ELSE t.top5_cex_region END as top5_cex_region,
-        CASE WHEN ic.self_cex_region IS NOT NULL THEN 999999 ELSE t.top5_cex_region_count END as top5_cex_region_count,
+        -- Top 1
         CASE 
-            WHEN ic.self_cex_region IS NOT NULL THEN 'cex_address'
-            WHEN t.top1_cex_region IS NULL THEN 'no_cex_interaction'
+            WHEN ic.self_cex_name IS NOT NULL THEN ic.self_cex_name
+            ELSE t.top1_cex
+        END as top1_cex,
+        CASE 
+            WHEN ic.self_cex_region IS NOT NULL THEN ic.self_cex_region
+            ELSE t.top1_cex_region
+        END as top1_cex_region,
+        CASE 
+            WHEN ic.self_cex_name IS NOT NULL THEN 999999
+            ELSE t.top1_cex_count
+        END as top1_cex_count,
+        -- Top 2
+        CASE 
+            WHEN ic.self_cex_name IS NOT NULL THEN ic.self_cex_name
+            ELSE t.top2_cex
+        END as top2_cex,
+        CASE 
+            WHEN ic.self_cex_region IS NOT NULL THEN ic.self_cex_region
+            ELSE t.top2_cex_region
+        END as top2_cex_region,
+        CASE 
+            WHEN ic.self_cex_name IS NOT NULL THEN 999999
+            ELSE t.top2_cex_count
+        END as top2_cex_count,
+        -- Top 3
+        CASE 
+            WHEN ic.self_cex_name IS NOT NULL THEN ic.self_cex_name
+            ELSE t.top3_cex
+        END as top3_cex,
+        CASE 
+            WHEN ic.self_cex_region IS NOT NULL THEN ic.self_cex_region
+            ELSE t.top3_cex_region
+        END as top3_cex_region,
+        CASE 
+            WHEN ic.self_cex_name IS NOT NULL THEN 999999
+            ELSE t.top3_cex_count
+        END as top3_cex_count,
+        -- Top 4
+        CASE 
+            WHEN ic.self_cex_name IS NOT NULL THEN ic.self_cex_name
+            ELSE t.top4_cex
+        END as top4_cex,
+        CASE 
+            WHEN ic.self_cex_region IS NOT NULL THEN ic.self_cex_region
+            ELSE t.top4_cex_region
+        END as top4_cex_region,
+        CASE 
+            WHEN ic.self_cex_name IS NOT NULL THEN 999999
+            ELSE t.top4_cex_count
+        END as top4_cex_count,
+        -- Top 5
+        CASE 
+            WHEN ic.self_cex_name IS NOT NULL THEN ic.self_cex_name
+            ELSE t.top5_cex
+        END as top5_cex,
+        CASE 
+            WHEN ic.self_cex_region IS NOT NULL THEN ic.self_cex_region
+            ELSE t.top5_cex_region
+        END as top5_cex_region,
+        CASE 
+            WHEN ic.self_cex_name IS NOT NULL THEN 999999
+            ELSE t.top5_cex_count
+        END as top5_cex_count,
+        CASE 
+            WHEN ic.self_cex_name IS NOT NULL THEN 'cex_address'
+            WHEN t.top1_cex IS NULL THEN 'no_cex_interaction'
             ELSE 'has_cex_interaction'
         END as cex_interaction_type
     FROM all_wallets w
@@ -486,17 +580,22 @@ SELECT
     IFNULL(n.top10_namespace, 'N/A') as top10_namespace,
     IFNULL(n.top10_namespace_count, 0) as top10_namespace_count,
     
-    -- Top 5 CEX Region（含次数）
+    -- Top 5 CEX（名称+地区+次数）
+    IFNULL(c.top1_cex, 'N/A') as top1_cex,
     IFNULL(c.top1_cex_region, 'N/A') as top1_cex_region,
-    IFNULL(c.top1_cex_region_count, 0) as top1_cex_region_count,
+    IFNULL(c.top1_cex_count, 0) as top1_cex_count,
+    IFNULL(c.top2_cex, 'N/A') as top2_cex,
     IFNULL(c.top2_cex_region, 'N/A') as top2_cex_region,
-    IFNULL(c.top2_cex_region_count, 0) as top2_cex_region_count,
+    IFNULL(c.top2_cex_count, 0) as top2_cex_count,
+    IFNULL(c.top3_cex, 'N/A') as top3_cex,
     IFNULL(c.top3_cex_region, 'N/A') as top3_cex_region,
-    IFNULL(c.top3_cex_region_count, 0) as top3_cex_region_count,
+    IFNULL(c.top3_cex_count, 0) as top3_cex_count,
+    IFNULL(c.top4_cex, 'N/A') as top4_cex,
     IFNULL(c.top4_cex_region, 'N/A') as top4_cex_region,
-    IFNULL(c.top4_cex_region_count, 0) as top4_cex_region_count,
+    IFNULL(c.top4_cex_count, 0) as top4_cex_count,
+    IFNULL(c.top5_cex, 'N/A') as top5_cex,
     IFNULL(c.top5_cex_region, 'N/A') as top5_cex_region,
-    IFNULL(c.top5_cex_region_count, 0) as top5_cex_region_count,
+    IFNULL(c.top5_cex_count, 0) as top5_cex_count,
     c.cex_interaction_type,
     
     -- 数据质量
