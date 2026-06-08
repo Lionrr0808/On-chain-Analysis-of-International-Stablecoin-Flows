@@ -41,7 +41,7 @@ wallet_txs AS (
     FROM `bigquery-public-data.crypto_ethereum.transactions` t
     INNER JOIN all_wallets w ON LOWER(t.from_address) = w.wallet
     WHERE 
-        t.block_timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 365 DAY)
+        t.block_timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 3650 DAY)
         AND t.receipt_status = 1
         AND t.gas_price > 0
         AND t.receipt_gas_used > 0
@@ -179,7 +179,7 @@ token_txs AS (
     INNER JOIN all_wallets w ON LOWER(t.from_address) = w.wallet
     INNER JOIN `stablecoin-on-chain-analysis.wallets.token_addresses_full` tk 
         ON LOWER(t.to_address) = tk.token_address
-    WHERE t.block_timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 365 DAY)
+    WHERE t.block_timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 3650 DAY)
       AND t.receipt_status = 1
 ),
 ranked_tokens AS (
@@ -235,7 +235,7 @@ namespace_txs AS (
     INNER JOIN all_wallets w ON LOWER(t.from_address) = w.wallet
     INNER JOIN `stablecoin-on-chain-analysis.wallets.namespace_addresses_full` ns 
         ON LOWER(t.to_address) = ns.contract_address
-    WHERE t.block_timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 365 DAY)
+    WHERE t.block_timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 3650 DAY)
       AND t.receipt_status = 1
 ),
 ranked_namespaces AS (
@@ -290,7 +290,7 @@ cex_interactions AS (
     FROM `bigquery-public-data.crypto_ethereum.transactions` t
     INNER JOIN all_wallets w ON LOWER(t.from_address) = w.wallet
     INNER JOIN cex_normalized c ON LOWER(t.to_address) = c.address
-    WHERE t.block_timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 365 DAY)
+    WHERE t.block_timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 3650 DAY)
       AND t.receipt_status = 1
     
     UNION ALL
@@ -302,7 +302,7 @@ cex_interactions AS (
     FROM `bigquery-public-data.crypto_ethereum.transactions` t
     INNER JOIN all_wallets w ON LOWER(t.to_address) = w.wallet
     INNER JOIN cex_normalized c ON LOWER(t.from_address) = c.address
-    WHERE t.block_timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 365 DAY)
+    WHERE t.block_timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 3650 DAY)
       AND t.receipt_status = 1
 ),
 
