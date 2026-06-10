@@ -9,7 +9,7 @@ from datetime import datetime
 from collections import Counter
 
 # ========== 配置部分 ==========
-API_KEY = "sk-500cfe7686fd4c48b21bb26b972f8244"  # 替换成你的
+API_KEY = ""  # 替换成你的
 API_URL = "https://api.deepseek.com/v1/chat/completions"
 INPUT_CSV = "filtered_addresses_with_domains.csv"
 OUTPUT_CSV = "classified_domains.csv"
