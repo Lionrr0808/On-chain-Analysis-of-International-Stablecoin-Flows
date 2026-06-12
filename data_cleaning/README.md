@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document describes the feature set used to train a Gradient Boosted Decision Tree (GBDT) model for predicting the geographic region of cryptocurrency wallets. The features are divided into 11 categories, totaling approximately 65 features.
+This document describes the feature set used to train a Gradient Boosted Decision Tree (GBDT) model for predicting the geographic region of cryptocurrency wallets. The features are divided into 11 categories, totaling approximately 60 features.
 
 ### Target Label
 - `final_label`: Geographic region of the wallet
@@ -54,17 +54,20 @@ This document describes the feature set used to train a Gradient Boosted Decisio
 
 ---
 
-### 4. Seasonal/DST Features
+### 4. Daylight Saving Time (DST) Features
 
 | Feature Name | Type | Description | Missing Value Handling |
 |--------------|------|-------------|------------------------|
-| `avg_tx_hour_period1` | float | Average transaction hour during Mar 14 - Nov 7 | Fill with -1 |
-| `avg_tx_hour_period2` | float | Average transaction hour during Nov 8 - Mar 13 | Fill with -1 |
-| `avg_tx_hour_period3` | float | Average transaction hour during Mar 21 - Oct 31 | Fill with -1 |
-| `avg_tx_hour_period4` | float | Average transaction hour during Nov 1 - Mar 10 | Fill with -1 |
 | `tx_hour_variance` | float | Variance of transaction hour distribution (regularity) | Fill with -1 |
+| `dst_shift_mean` | float | Average hour shift between DST and non-DST periods | Fill with -1 |
+| `has_dst_behavior` | int | Whether the wallet exhibits DST behavior (0/1) | Fill with 0 |
+| `dst_behavior_strength` | float | Strength of DST behavior (absolute shift) | Fill with 0 |
+| `seasonal_shift` | float | Seasonal shift between summer and winter | Fill with -1 |
+| `dst_activity_ratio` | float | Ratio of DST to non-DST transaction volume | Fill with -1 |
+| `dst_shift_peak` | float | Peak hour shift between DST and non-DST periods | Fill with -1 |
+| `dst_distribution_shift_l1` | float | L1 distance between DST and non-DST hour distributions | Fill with -1 |
 
-**Description**: Different regions have different adoption of Daylight Saving Time (DST). Seasonal behavior changes help distinguish North America/Europe from Asia.
+**Description**: Different regions have different adoption of Daylight Saving Time (DST). DST is common in Europe and North America but non-existent in Asia. These features capture the shift in activity patterns between DST and non-DST periods.
 
 ---
 
@@ -110,11 +113,11 @@ This document describes the feature set used to train a Gradient Boosted Decisio
 |--------------|------|-------------|------------------------|
 | `top1_token` ~ `top5_token` | category | Token names ranked 1-5 by transaction count | Keep NaN (handled by GBDT) |
 | `top1_token_count` ~ `top5_token_count` | int | Corresponding transaction counts | Fill with 0 |
-| `top6_10_token_total_count` | int | Total transaction count of top6-10 tokens | Fill with 0 |
-| `top6_10_token_diversity` | int | Number of unique tokens in top6-10 | Fill with 0 |
-| `top6_10_token_ratio` | float | Ratio of top6-10 to total transactions | Fill with 0 |
+| `top1_10_token_total_count` | int | Total transaction count of top1-10 tokens | Fill with 0 |
+| `top1_10_token_diversity` | int | Number of unique tokens in top1-10 | Fill with 0 |
+| `top1_10_token_ratio` | float | Ratio of top1-10 to total transactions | Fill with 0 |
 
-**Description**: Token preference is an important signal for regional differences (e.g., Asia prefers USDT, Europe/America prefers USDC).
+**Description**: Token preference is an important signal for regional differences (e.g., Asia prefers USDT, Europe/America prefers USDC). The aggregated features capture the overall token usage pattern beyond the top 5.
 
 ---
 
@@ -124,13 +127,13 @@ This document describes the feature set used to train a Gradient Boosted Decisio
 |--------------|------|-------------|------------------------|
 | `top1_namespace` ~ `top5_namespace` | category | Namespace names ranked 1-5 by interaction count | Keep NaN (handled by GBDT) |
 | `top1_namespace_count` ~ `top5_namespace_count` | int | Corresponding interaction counts | Fill with 0 |
-| `top6_10_namespace_total_count` | int | Total interaction count of top6-10 namespaces | Fill with 0 |
-| `top6_10_namespace_diversity` | int | Number of unique namespaces in top6-10 | Fill with 0 |
-| `top6_10_namespace_ratio` | float | Ratio of top6-10 to total interactions | Fill with 0 |
+| `top1_10_namespace_total_count` | int | Total interaction count of top1-10 namespaces | Fill with 0 |
+| `top1_10_namespace_diversity` | int | Number of unique namespaces in top1-10 | Fill with 0 |
+| `top1_10_namespace_ratio` | float | Ratio of top1-10 to total interactions | Fill with 0 |
 
 **Namespace Types**: dex, lending, nft, bridge, yield, oracle, etc.
 
-**Description**: Different regions have different preferences for DeFi, NFT, and other protocol categories.
+**Description**: Different regions have different preferences for DeFi, NFT, and other protocol categories. The aggregated features capture the full namespace usage pattern.
 
 ---
 
@@ -143,18 +146,16 @@ This document describes the feature set used to train a Gradient Boosted Decisio
 | `top2_cex_region` | category | Region of the second most frequently used CEX | Keep NaN (handled by GBDT) |
 | `top2_cex_count` | int | Number of interactions with top2 CEX | Fill with 0 |
 | `cex_interaction_type` | category | Type of CEX interaction | Fill with 'no_cex_interaction' |
-| `top1_2_cex_total_count` | int | Total interactions with top1-2 CEXs | Fill with 0 |
-| `top1_2_cex_region_diversity` | int | Number of unique CEX regions in top1-2 | Fill with 0 |
+| `top1_5_cex_total_count` | int | Total interactions with top1-5 CEXs (aggregated) | Fill with 0 |
+| `top1_5_cex_region_diversity` | int | Number of unique CEX regions in top1-5 (aggregated) | Fill with 0 |
 | `has_multiple_cex_regions` | int | Whether using CEXs from multiple regions (0/1) | Fill with 0 |
-| `top3_5_cex_total_count` | int | Total interactions with top3-5 CEXs (aggregated) | Fill with 0 |
-| `top3_5_cex_region_diversity` | int | Number of unique CEX regions in top3-5 (aggregated) | Fill with 0 |
 
 **cex_interaction_type Values**:
 - `cex_address`: The wallet itself is a CEX address
 - `has_cex_interaction`: Has interactions with CEXs
 - `no_cex_interaction`: No CEX interactions
 
-**Description**: CEX regional preference is one of the strongest predictive signals. Users tend to use local or region-friendly exchanges.
+**Description**: CEX regional preference is one of the strongest predictive signals. Users tend to use local or region-friendly exchanges. The aggregated top1-5 features provide a comprehensive view of CEX usage patterns.
 
 ---
 
@@ -165,14 +166,14 @@ This document describes the feature set used to train a Gradient Boosted Decisio
 | Time Distribution Features | 4 |
 | Transaction Amount Features | 3 |
 | Time Ratio Features | 4 |
-| Seasonal/DST Features | 5 |
+| DST Features | 8 |
 | Gas Fee Features | 2 |
 | Wallet Activity Features | 3 |
 | Protocol Usage Features | 4 |
 | Top Token Features | 15 |
 | Top Namespace Features | 15 |
-| CEX Features | 10 |
-| **Total** | **65** |
+| CEX Features | 8 |
+| **Total** | **66** |
 
 ---
 
@@ -181,9 +182,10 @@ This document describes the feature set used to train a Gradient Boosted Decisio
 | Feature Type | Handling Method | Explanation |
 |--------------|-----------------|-------------|
 | Numerical features (with business meaning of zero) | Fill with `0` | e.g., transaction counts, count-based features |
-| Numerical features (without business meaning of zero) | Fill with `-1` | e.g., hour-based, period-based features |
+| Numerical features (DST shift features) | Fill with `-1` | Indicates no DST period data available |
+| Binary DST features | Fill with `0` | Default to no DST behavior |
 | Categorical features (CEX type) | Fill with `'no_cex_interaction'` | Clear business category |
-| Other categorical features | Keep `NaN` | GBDT automatically handles missing values |
+| Token/Namespace/CEX region categorical features | Keep `NaN` | GBDT automatically handles missing values |
 
 ---
 
