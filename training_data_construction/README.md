@@ -56,6 +56,7 @@ Output ONLY the number (0-5):
 Only addresses meeting **both** conditions were included in the final training set:
 
 1. **Label Agreement**: The region label from CEX interaction matches the label from domain name analysis.
+   or domain name label with stricter prompt and restrictions (e.g. temp = 0.01)
 2. **Transaction Activity**: Total transaction amount > 30.
 
 ---
