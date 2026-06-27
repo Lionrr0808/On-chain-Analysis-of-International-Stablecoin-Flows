@@ -1,8 +1,32 @@
-# Simplified Hierarchical GBDT Model - Performance Report
+# Hierarchical GBDT Model for Wallet Region Classification - Complete Report
+
+---
 
 ## 📋 Overview
 
-This report presents the performance of a **simplified Hierarchical GBDT (Gradient Boosted Decision Tree) model** for predicting the geographic region of cryptocurrency wallets. The model uses a streamlined feature set, keeping only `top1_cex_region` and `top2_cex_region` as categorical features, while excluding all token-related, namespace-related, and CEX name features. All numerical features are retained.
+This report presents the development and application of a **hierarchical Gradient Boosted Decision Tree (GBDT) model** for predicting the geographic region of cryptocurrency wallets. The model follows the paper's approach using a three-level hierarchical classification strategy with inverse frequency weighting to address class imbalance.
+
+### Model Architecture
+
+```
+                    ┌─────────────────────┐
+                    │   Level 1: Coarse   │
+                    │  Classification     │
+                    │  (3 Classes)        │
+                    └──────────┬──────────┘
+                               │
+              ┌────────────────┼────────────────┐
+              │                │                │
+         ┌────▼────┐     ┌─────▼─────┐   ┌─────▼─────┐
+         │ NA_LAC  │     │AME_Europe │   │   Asia    │
+         └────┬────┘     └─────┬─────┘   └───────────┘
+              │                │
+         ┌────▼────┐     ┌─────▼─────┐
+         │ Level 2 │     │ Level 3   │
+         │ NA vs   │     │ AME vs    │
+         │ LAC     │     │ Europe    │
+         └─────────┘     └───────────┘
+```
 
 ### Key Model Characteristics
 
@@ -36,19 +60,19 @@ The following feature categories were **excluded** to improve model stability an
 
 ---
 
-## 📊 Class Distribution
+## 📊 Training Data Distribution
 
-### Training Data Distribution
+### Class Distribution (Full Dataset)
 
 | Region | Count | Percentage |
 |--------|-------|------------|
-| Asia and Pacific | 7,196 | 42.9% |
-| Europe | 4,153 | 24.7% |
-| North America | 3,469 | 20.7% |
-| Africa and Middle East | 1,055 | 6.3% |
-| Latin America and Caribbean | 912 | 5.4% |
+| Asia and Pacific | 9,995 | 42.9% |
+| Europe | 5,769 | 24.7% |
+| North America | 4,818 | 20.7% |
+| Africa and Middle East | 1,465 | 6.3% |
+| Latin America and Caribbean | 1,267 | 5.4% |
 
-### Level-wise Class Distribution
+### Level-wise Class Distribution and Weights
 
 #### Level 1 (Coarse Classification)
 
@@ -80,6 +104,14 @@ The following feature categories were **excluded** to improve model stability an
 
 ## 📈 Model Performance
 
+### Level-wise Training Performance
+
+| Level | Task | Training Accuracy | Validation Accuracy | Training Time |
+|-------|------|------------------|---------------------|---------------|
+| **Level 1** | 3-class coarse | **86.62%** | **78.53%** | 45.72s |
+| **Level 2** | NA vs LAC | **82.01%** | **79.18%** | 1.27s |
+| **Level 3** | AME vs Europe | **91.80%** | **76.44%** | 1.37s |
+
 ### Overall Test Metrics
 
 | Metric | Value |
@@ -88,7 +120,7 @@ The following feature categories were **excluded** to improve model stability an
 | Macro F1 Score | 0.6182 |
 | Weighted F1 Score | 0.7381 |
 
-### Per-Class Performance
+### Per-Class Performance (Test Set)
 
 | Region | Precision | Recall | F1-Score | Support |
 |--------|-----------|--------|----------|---------|
@@ -172,7 +204,7 @@ The confusion matrix below displays the true region in the rows and the predicte
 | **Activity Features** | wallet_age_days, avg_tx_per_day | **~0.03** |
 | **Gas Features** | avg_gas_price | **~0.01** |
 
-### Observations
+### Key Observations
 
 1. **CEX region remains the strongest predictor** despite 50% penalty, indicating its importance for region classification
 
@@ -180,61 +212,177 @@ The confusion matrix below displays the true region in the rows and the predicte
 
 3. **Activity and gas features** have relatively low importance, suggesting they provide limited discriminatory power
 
-4. **Polynomial features** from the 24-hour distribution are moderately important
+---
+
+## 📊 Classification Results (602,840 Wallets)
+
+### Dataset Statistics
+
+| Metric | Value |
+|--------|-------|
+| **Total wallets** | 602,840 |
+| **Direct assignment (cex_address)** | 36 (0.0%) |
+| **Model prediction** | 602,804 (100.0%) |
+
+### CEX Interaction Type Distribution
+
+| Type | Count | Percentage |
+|------|-------|------------|
+| `no_cex_interaction` | 585,345 | 97.1% |
+| `has_cex_interaction` | 17,459 | 2.9% |
+| `cex_address` | 36 | 0.0% |
 
 ---
 
-## 📊 Level-wise Training Performance
+## 📊 Hard Classification Results
 
-| Level | Task | Training Accuracy | Validation Accuracy | Training Time |
-|-------|------|------------------|---------------------|---------------|
-| **Level 1** | 3-class coarse | **86.62%** | **78.53%** | 45.72s |
-| **Level 2** | NA vs LAC | **82.01%** | **79.18%** | 1.27s |
-| **Level 3** | AME vs Europe | **91.80%** | **76.44%** | 1.37s |
+### Overall Distribution
 
-### Observations
+| Region | Count | Percentage |
+|--------|-------|------------|
+| **Europe** | 424,848 | **70.5%** |
+| **Asia and Pacific** | 98,895 | **16.4%** |
+| **North America** | 35,318 | **5.9%** |
+| **Africa and Middle East** | 22,437 | **3.7%** |
+| **Latin America and Caribbean** | 21,342 | **3.5%** |
+| **TOTAL** | **602,840** | **100.0%** |
 
-1. **Level 1** shows good generalization (86.62% train vs 78.53% validation)
+### Summary Statistics
 
-2. **Level 2** is the most balanced (82.01% train vs 79.18% validation)
+| Metric | Value |
+|--------|-------|
+| Most common | Europe (70.5%) |
+| Least common | Latin America and Caribbean (3.5%) |
+| Range | 66.9% |
+| Diversity Index (Simpson) | 0.4704 |
 
-3. **Level 3** shows signs of overfitting (91.80% train vs 76.44% validation), likely due to the Africa weight boost
+### By CEX Interaction Type
+
+#### `has_cex_interaction` (17,459 wallets)
+
+| Region | Count | Percentage |
+|--------|-------|------------|
+| Asia and Pacific | 5,588 | 32.0% |
+| Europe | 3,547 | 20.3% |
+| Latin America and Caribbean | 3,518 | 20.2% |
+| Other | 4,806 | 27.5% |
+
+#### `no_cex_interaction` (585,345 wallets)
+
+| Region | Count | Percentage |
+|--------|-------|------------|
+| Europe | 421,291 | **72.0%** |
+| Asia and Pacific | 93,295 | 15.9% |
+| North America | 31,961 | 5.5% |
+| Other | 38,798 | 6.6% |
+
+#### `cex_address` (36 wallets - Direct Assignment)
+
+| Region | Count | Percentage |
+|--------|-------|------------|
+| Asia and Pacific | 12 | 33.3% |
+| Europe | 10 | 27.8% |
+| Latin America and Caribbean | 8 | 22.2% |
+| Other | 6 | 16.7% |
 
 ---
 
-## 📝 Summary
+## 📊 Probability Aggregation Results
 
-### Strengths
+### Overall Distribution (All Wallets)
 
-1. **Strong Asia Performance**: 79.9% accuracy, 0.83 F1-score
+| Region | Sum Probability | Percentage |
+|--------|-----------------|------------|
+| **Europe** | 249,567.3 | **41.4%** |
+| **Asia and Pacific** | 155,476.5 | **25.8%** |
+| **Africa and Middle East** | 77,700.9 | **12.9%** |
+| **North America** | 70,382.2 | **11.7%** |
+| **Latin America and Caribbean** | 49,713.0 | **8.2%** |
+| **TOTAL** | **602,840.0** | **100.0%** |
 
-2. **Excellent North America Precision**: 0.97 precision, 77.8% accuracy
+### Summary Statistics
 
-3. **Improved Africa Recall**: Boosted to 48% (compared to previous 53% with simplified features)
+| Metric | Value |
+|--------|-------|
+| Most common | Europe (41.4%) |
+| Least common | Latin America and Caribbean (8.2%) |
+| Range | 33.2% |
 
-4. **Simplified Feature Set**: Reduced from 60+ to 37 features, improving interpretability and stability
+### By Assignment Type
 
-5. **Efficient Training**: Total training time under 50 seconds
+#### Direct Assignment (`cex_address`, 36 wallets)
 
-### Challenges
+| Region | Sum Probability | Percentage |
+|--------|-----------------|------------|
+| Asia and Pacific | 12.0 | 33.3% |
+| Europe | 10.0 | 27.8% |
+| Latin America and Caribbean | 8.0 | 22.2% |
+| Africa and Middle East | 3.0 | 8.3% |
+| North America | 3.0 | 8.3% |
+| **TOTAL** | **36.0** | **100.0%** |
 
-1. **Africa ↔ Europe Confusion**: 23.3% of African samples misclassified as Europe
+#### Model Prediction (602,804 wallets)
 
-2. **Latin America ↔ Asia Confusion**: 17.3% misclassification rate
+| Region | Sum Probability | Percentage |
+|--------|-----------------|------------|
+| Europe | 249,557.3 | **41.4%** |
+| Asia and Pacific | 155,464.5 | **25.8%** |
+| Africa and Middle East | 77,697.9 | **12.9%** |
+| North America | 70,379.2 | **11.7%** |
+| Latin America and Caribbean | 49,705.0 | **8.2%** |
+| **TOTAL** | **602,804.0** | **100.0%** |
 
-3. **Europe Performance**: Moderate at 62.2% accuracy
+---
 
-4. **Low Precision for Africa (0.33) and Latin America (0.26)**: Many false positives
+## 📊 Hard Classification vs Probability Aggregation
 
-### Recommendations
+| Region | Hard Classification | Probability Aggregation | Difference | Assessment |
+|--------|-------------------|------------------------|------------|------------|
+| **Europe** | 70.5% | 41.4% | **-29.1%** | Hard classification overestimates Europe |
+| **Asia and Pacific** | 16.4% | 25.8% | **+9.4%** | Probability gives more realistic estimate |
+| **Africa and Middle East** | 3.7% | 12.9% | **+9.2%** | Probability better captures uncertainty |
+| **North America** | 5.9% | 11.7% | **+5.8%** | Probability improves North America estimate |
+| **Latin America and Caribbean** | 3.5% | 8.2% | **+4.7%** | Probability improves Latin America estimate |
 
-| Priority | Action | Expected Impact |
-|----------|--------|-----------------|
-| **High** | Add region-specific time features | Reduce Africa↔Europe confusion |
-| **High** | Increase NA_LAC weight to 1.8x | Improve Latin America precision |
-| **Medium** | Add stablecoin preference features | Better distinguish Asia vs others |
-| **Medium** | Test cex_penalty=0.3 | Allow CEX features more influence |
-| **Low** | Add more tree estimators for Level 3 | Reduce overfitting |
+### Key Observations
+
+1. **Hard classification significantly overestimates Europe** (70.5% vs 41.4%), indicating the model is overly confident in assigning wallets to Europe
+
+2. **Probability aggregation provides more balanced and realistic estimates** for all regions
+
+3. **Asia and Pacific emerges as the second largest region** (25.8%) when using probability aggregation, which aligns with stablecoin usage patterns
+
+4. **Underrepresented regions (Africa, Latin America, North America) all show higher percentages** in probability aggregation, better reflecting their true distribution
+
+---
+
+## 🎯 Regional Distribution by CEX Interaction Type
+
+### `has_cex_interaction` (17,459 wallets)
+
+| Region | Hard Count | Hard % |
+|--------|-----------|--------|
+| Asia and Pacific | 5,588 | 32.0% |
+| Europe | 3,547 | 20.3% |
+| Latin America and Caribbean | 3,518 | 20.2% |
+| Other | 4,806 | 27.5% |
+
+### `no_cex_interaction` (585,345 wallets)
+
+| Region | Hard Count | Hard % |
+|--------|-----------|--------|
+| Europe | 421,291 | **72.0%** |
+| Asia and Pacific | 93,295 | 15.9% |
+| North America | 31,961 | 5.5% |
+| Other | 38,798 | 6.6% |
+
+### Key Observations
+
+1. **`no_cex_interaction` wallets** are overwhelmingly predicted as Europe (72.0%), suggesting that wallets without CEX interactions are defaulting to Europe
+
+2. **`has_cex_interaction` wallets** show more balanced distribution, with Asia and Pacific (32.0%) as the largest region
+
+3. **The small `cex_address` sample** (36 wallets) shows a more diverse distribution, with Asia and Pacific (33.3%) being the most common
 
 ---
 
@@ -247,6 +395,23 @@ The confusion matrix below displays the true region in the rows and the predicte
 | `GBDT_model_simplified_encoders.joblib` | Categorical encoders |
 | `confusion_matrix_simplified.png` | Row-normalized confusion matrix |
 | `feature_importance_simplified.png` | Feature importance visualization |
+| `predictions_with_probabilities.csv` | Complete predictions with probability scores |
+| `region_distribution_summary_with_probs.csv` | Summary statistics comparing hard classification and probability aggregation |
 
 ---
 
+## 💡 Recommendations
+
+| Priority | Recommendation | Rationale |
+|----------|----------------|-----------|
+| **High** | **Use probability aggregation for final results** | Provides more stable and realistic estimates; reduces the 29% overestimation of Europe |
+| **High** | **Calibrate model to reduce Europe over-prediction** | Hard classification shows 70.5% Europe, which is likely unrealistic |
+| **High** | **Add region-specific features for `no_cex_interaction` wallets** | These wallets default to Europe; additional features could improve discrimination |
+| **Medium** | **Increase NA_LAC weight to 1.8x** | Improve Latin America precision |
+| **Medium** | **Add stablecoin preference features** | Better distinguish Asia vs others |
+| **Medium** | **Test cex_penalty=0.3** | Allow CEX features more influence |
+| **Low** | **Add more tree estimators for Level 3** | Reduce overfitting |
+
+---
+
+*Report completed on: 2024-06-27*
